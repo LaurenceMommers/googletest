@@ -2567,16 +2567,40 @@ namespace internal {
 
 #if GTEST_HAS_EXCEPTIONS
 
+#if __cpp_rtti
+// unwrap and print nested exceptions
+static void FormatCxxExceptionMessage_unwrap(Message& message,
+                                             const std::exception& ex,
+                                             int level=1) {
+  message << '\n' << std::string(level*4, ' ') << "* " << ex.what();
+
+  try {
+      std::rethrow_if_nested(ex);
+  } catch(const std::exception& e) {
+      FormatCxxExceptionMessage_unwrap(message, e, level+1);
+  } catch(...) {}
+}
+#endif
+
 // Adds an "exception thrown" fatal failure to the current test.
-static std::string FormatCxxExceptionMessage(const char* description,
+static std::string FormatCxxExceptionMessage(const std::exception* ex,
                                              const char* location) {
   Message message;
-  if (description != nullptr) {
-    message << "C++ exception with description \"" << description << "\"";
+  if (ex != nullptr) {
+    message << "C++ exception with description \"" << ex->what() << "\" thrown in " << location << ".";
+
+    #if __cpp_rtti
+    // unwrap nested exceptions
+    try {
+        std::rethrow_if_nested(*ex);
+    } catch(const std::exception& e) {
+        FormatCxxExceptionMessage_unwrap(message, e);
+    } catch(...) {}
+    #endif
+
   } else {
-    message << "Unknown C++ exception";
+    message << "Unknown C++ exception thrown in " << location << ".";
   }
-  message << " thrown in " << location << ".";
 
   return message.GetString();
 }
@@ -2665,7 +2689,7 @@ Result HandleExceptionsInMethodIfSupported(T* object, Result (T::*method)(),
     } catch (const std::exception& e) {  // NOLINT
       internal::ReportFailureInUnknownLocation(
           TestPartResult::kFatalFailure,
-          FormatCxxExceptionMessage(e.what(), location));
+          FormatCxxExceptionMessage(&e, location));
     } catch (...) {  // NOLINT
       internal::ReportFailureInUnknownLocation(
           TestPartResult::kFatalFailure,
